@@ -22,10 +22,23 @@ impl UiController {
     /// Allows another thread to indicate the current status of the patching process.
     ///
     /// This updates the UI with useful information.
-    pub fn dispatch_patching_status(&self, status: PatchingStatus) {
-        if let Err(e) = self.web_view_handle.dispatch(move |webview| {
+    pub fn dispatch_patching_status(&self, status: PatchingStatus) -> Result<(), web_view::Error> {
+        self.web_view_handle.dispatch(move |webview| {
             let result = match status {
-                PatchingStatus::Ready => webview.eval("patchingStatusReady()"),
+                PatchingStatus::Ready => {
+                    let js_code = "$(\"#download-progress-bar\")
+                        .css(\"width\", \"100%\")
+                        .attr(\"aria-valuenow\", \"100\")
+                        .removeClass(\"bg-warning\")
+                        .removeClass(\"bg-danger\")
+                        .addClass(\"bg-primary\");
+                        $(\"#download-progress-text\").text(\"Ready\");
+                        $(\"#button-play\").prop('disabled', false);";
+                    if let Err(e) = webview.eval(js_code) {
+                        log::warn!("Failed to set ready status: {}.", e);
+                    }
+                    Ok(())
+                },
                 PatchingStatus::Error(msg) => {
                     webview.eval(&format!("patchingStatusError(\"{}\")", msg))
                 }
@@ -46,9 +59,7 @@ impl UiController {
                 log::warn!("Failed to dispatch patching status: {}.", e);
             }
             Ok(())
-        }) {
-            log::warn!("Failed to dispatch patching status: {}.", e);
-        }
+        })
     }
 
     pub fn set_patch_in_progress(&self, value: bool) {

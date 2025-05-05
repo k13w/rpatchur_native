@@ -26,14 +26,18 @@ impl UiController {
         self.web_view_handle.dispatch(move |webview| {
             let result = match status {
                 PatchingStatus::Ready => {
-                    let js_code = "$(\"#download-progress-bar\")
-                        .css(\"width\", \"100%\")
-                        .attr(\"aria-valuenow\", \"100\")
-                        .removeClass(\"bg-warning\")
-                        .removeClass(\"bg-danger\")
-                        .addClass(\"bg-primary\");
-                        $(\"#download-progress-text\").text(\"Ready\");
-                        $(\"#button-play\").prop('disabled', false);";
+                    let js_code = r#"
+                        const progressBar = document.getElementById('download-progress-bar');
+                        const progressText = document.getElementById('download-progress-text');
+                        const playButton = document.getElementById('button-play');
+                        
+                        progressBar.style.width = '100%';
+                        progressBar.setAttribute('aria-valuenow', '100');
+                        progressBar.classList.remove('bg-warning', 'bg-danger');
+                        progressBar.classList.add('bg-primary');
+                        progressText.textContent = 'Ready';
+                        playButton.disabled = false;
+                    "#;
                     if let Err(e) = webview.eval(js_code) {
                         log::warn!("Failed to set ready status: {}.", e);
                     }

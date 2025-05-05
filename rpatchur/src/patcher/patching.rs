@@ -19,18 +19,8 @@ enum MergeEntrySource {
     ThorArchive,
 }
 
-/// Indicates the transformation that should be applied to the data when copied
-/// from a GRF file to another.
-enum DataTransformation {
-    None,
-    // DecompressZlib,
-}
-
 struct MergeEntry {
     pub source: MergeEntrySource,
-    pub source_offset: u64,
-    pub data_size: usize,
-    pub transformation: DataTransformation,
 }
 
 /// Patches a GRF file with a THOR archive/patch.
@@ -102,9 +92,6 @@ fn apply_patch_to_grf_oop<R: Read + Seek>(
             entry.relative_path.clone(),
             MergeEntry {
                 source: MergeEntrySource::GrfArchive,
-                source_offset: entry.offset,
-                data_size: entry.size_compressed,
-                transformation: DataTransformation::None,
             },
         );
     }
@@ -117,9 +104,6 @@ fn apply_patch_to_grf_oop<R: Read + Seek>(
             entry.relative_path.clone(),
             MergeEntry {
                 source: MergeEntrySource::ThorArchive,
-                source_offset: entry.offset,
-                data_size: entry.size_compressed,
-                transformation: DataTransformation::None,
             },
         );
     }

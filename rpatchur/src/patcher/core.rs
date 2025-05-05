@@ -6,7 +6,7 @@ use std::sync::{
 };
 use std::time::{Duration, Instant};
 
-use advisory_lock::{AdvisoryFileLock, FileLockMode};
+use advisory_lock::FileLockMode;
 use anyhow::{anyhow, Context, Result};
 use futures::executor::block_on;
 use futures::stream::{StreamExt, TryStreamExt};
@@ -76,14 +76,16 @@ async fn update_game(
     match take_update_lock().with_context(|| "Failed to take the update lock") {
         Err(err) => {
             log::error!("{:#}", err);
-            ui_controller.dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err)));
+            if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err))) {
+                log::warn!("Failed to update error status: {}", e);
+            }
             return;
         }
         Ok(lock_file) => {
             // Tell the UI and other processes that we're currently working
             ui_controller.set_patch_in_progress(true);
             let _guard = scopeguard::guard((), |_| {
-                let _ = lock_file.unlock();
+                let _ = advisory_lock::AdvisoryFileLock::unlock(&lock_file);
                 ui_controller.set_patch_in_progress(false);
             });
 
@@ -91,11 +93,15 @@ async fn update_game(
             match res {
                 Err(err) => {
                     log::error!("{:#}", err);
-                    ui_controller
-                        .dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err)));
+                    if let Err(e) = ui_controller
+                        .dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err))) {
+                        log::warn!("Failed to update error status: {}", e);
+                    }
                 }
                 Ok(()) => {
-                    ui_controller.dispatch_patching_status(PatchingStatus::Ready);
+                    if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::Ready) {
+                        log::warn!("Failed to update ready status: {}", e);
+                    }
                     log::info!("Patching finished!");
                 }
             }
@@ -113,13 +119,15 @@ fn apply_single_patch(
     match take_update_lock().with_context(|| "Failed to take the update lock") {
         Err(err) => {
             log::error!("{:#}", err);
-            ui_controller.dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err)));
+            if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err))) {
+                log::warn!("Failed to update error status: {}", e);
+            }
         }
         Ok(lock_file) => {
             // Tell the UI and other processes that we're currently working
             ui_controller.set_patch_in_progress(true);
             let _guard = scopeguard::guard((), |_| {
-                let _ = lock_file.unlock();
+                let _ = advisory_lock::AdvisoryFileLock::unlock(&lock_file);
                 ui_controller.set_patch_in_progress(false);
             });
 
@@ -128,8 +136,10 @@ fn apply_single_patch(
             match current_working_dir {
                 Err(err) => {
                     log::error!("{:#}", err);
-                    ui_controller
-                        .dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err)));
+                    if let Err(e) = ui_controller
+                        .dispatch_patching_status(PatchingStatus::Error(format!("{:#}", err))) {
+                        log::warn!("Failed to update error status: {}", e);
+                    }
                 }
                 Ok(current_working_dir) => {
                     let patch_file_name = patch_file_path
@@ -144,16 +154,20 @@ fn apply_single_patch(
                     match res {
                         Err(err) => {
                             log::error!("{:#}", err);
-                            ui_controller.dispatch_patching_status(PatchingStatus::Error(format!(
+                            if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::Error(format!(
                                 "{:#}",
                                 err
-                            )));
+                            ))) {
+                                log::warn!("Failed to update error status: {}", e);
+                            }
                         }
                         Ok(()) => {
                             log::info!("Done");
-                            ui_controller.dispatch_patching_status(
+                            if let Err(e) = ui_controller.dispatch_patching_status(
                                 PatchingStatus::ManualPatchApplied(patch_file_name),
-                            );
+                            ) {
+                                log::warn!("Failed to update patch status: {}", e);
+                            }
                         }
                     }
                 }
@@ -167,7 +181,7 @@ fn apply_single_patch(
 fn take_update_lock() -> Result<std::fs::File> {
     let lock_file_name = get_update_lock_file_path()?;
     let lock_file = std::fs::File::create(lock_file_name)?;
-    lock_file.try_lock(FileLockMode::Exclusive)?;
+    advisory_lock::AdvisoryFileLock::try_lock(&lock_file, FileLockMode::Exclusive)?;
 
     Ok(lock_file)
 }
@@ -373,7 +387,9 @@ async fn download_patches_concurrent(
     patching_thread_rx: &mut flume::Receiver<PatcherCommand>,
 ) -> InterruptibleFnResult<Vec<PendingPatch>> {
     let patch_count = patch_list.len();
-    ui_controller.dispatch_patching_status(PatchingStatus::DownloadInProgress(0, patch_count, 0));
+    if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::DownloadInProgress(0, patch_count, 0)) {
+        log::warn!("Failed to update download status: {}", e);
+    }
     // Download files in a cancelable manner
     let mut vec = tokio::select! {
         cancel_res = wait_for_cancellation(patching_thread_rx) => return Err(cancel_res),
@@ -446,11 +462,13 @@ async fn download_patches_concurrent_inner(
             // If speed is "available", update UI
             if let Some(downloaded_bytes_per_sec) = downloaded_bytes_per_sec {
                 block_on(async {
-                    ui_controller.dispatch_patching_status(PatchingStatus::DownloadInProgress(
+                    if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::DownloadInProgress(
                         shared_patch_number_ref.load(Ordering::SeqCst),
                         patch_count,
                         downloaded_bytes_per_sec,
-                    ));
+                    )) {
+                        log::warn!("Failed to update download status: {}", e);
+                    }
                 });
             }
             last_downloaded_bytes = dl_now;
@@ -574,7 +592,9 @@ async fn apply_patches(
         ))
     })?;
     let patch_count = pending_patch_queue.len();
-    ui_controller.dispatch_patching_status(PatchingStatus::InstallationInProgress(0, patch_count));
+    if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::InstallationInProgress(0, patch_count)) {
+        log::warn!("Failed to update patching status: {}", e);
+    }
     for (patch_number, pending_patch) in pending_patch_queue.into_iter().enumerate() {
         // Cancel the patching process if we've been asked to or if the other
         // end of the channel has been disconnected
@@ -597,10 +617,12 @@ async fn apply_patches(
             log::warn!("Failed to write cache file: {}.", e);
         }
         // Update status
-        ui_controller.dispatch_patching_status(PatchingStatus::InstallationInProgress(
+        if let Err(e) = ui_controller.dispatch_patching_status(PatchingStatus::InstallationInProgress(
             1 + patch_number,
             patch_count,
-        ));
+        )) {
+            log::warn!("Failed to update patching status: {}", e);
+        }
     }
     Ok(())
 }

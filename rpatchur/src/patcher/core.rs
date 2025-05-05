@@ -13,7 +13,7 @@ use futures::stream::{StreamExt, TryStreamExt};
 use gruf::thor::{self, ThorArchive, ThorPatchInfo, ThorPatchList};
 use gruf::GrufError;
 use tokio::fs::File;
-use tokio::io::{AsyncSeekExt, AsyncWriteExt};
+use tokio::io::AsyncWriteExt;
 use url::Url;
 
 use super::cache::{read_cache_file, write_cache_file, PatcherCache};
